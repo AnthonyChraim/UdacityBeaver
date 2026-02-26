@@ -4,6 +4,7 @@ import os
 import time
 import ast
 import re
+import json
 from sqlalchemy.sql import text
 from datetime import datetime, timedelta
 from typing import Dict, List, Union, Tuple
@@ -15,11 +16,23 @@ except Exception:
     dotenv = None
 
 try:
-    # Optional dependency to align with a tool-oriented smolagents style.
-    from smolagents import tool
+    # Optional dependency used for framework-based worker delegation.
+    from smolagents import tool as smol_tool, CodeAgent, OpenAIServerModel
+    SMOLAGENTS_AVAILABLE = True
 except Exception:
-    def tool(func):
+    SMOLAGENTS_AVAILABLE = False
+    smol_tool = None
+
+
+def tool(func):
+    if smol_tool is None:
         return func
+    try:
+        return smol_tool(func)
+    except Exception:
+        # Keep execution robust when strict tool-schema/docstring parsing fails.
+        return func
+
 
 # Create an SQLite database
 db_engine = create_engine("sqlite:///munder_difflin.db")
@@ -737,6 +750,35 @@ def financial_report_tool(as_of_date: str) -> Dict:
     return generate_financial_report(as_of_date)
 
 
+@tool
+def unit_price_tool(item_name: str) -> float:
+    return float(ITEM_PRICE[item_name])
+
+
+def _as_json_dict(raw: Union[str, Dict], default: Dict) -> Dict:
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return default
+
+    text = raw.strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return default
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        try:
+            return ast.literal_eval(match.group(0))
+        except Exception:
+            return default
+
+
 class InventoryAgent:
     def assess_availability(self, requested_items: Dict[str, int], request_date: str, due_date: str) -> Dict:
         reorder_plan: List[Dict] = []
@@ -838,11 +880,107 @@ class SalesAgent:
         return financial_report_tool(request_date)
 
 
+class SmolagentsDelegator:
+    """
+    Optional framework layer:
+    - Uses smolagents workers when Vocareum key is present.
+    - Falls back to deterministic Python workers if unavailable.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = False
+        self.inventory_worker = None
+        self.quoting_worker = None
+        self.sales_worker = None
+
+        if not SMOLAGENTS_AVAILABLE:
+            return
+
+        api_key = os.getenv("UDACITY_OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return
+
+        try:
+            model = OpenAIServerModel(
+                model_id=os.getenv("UDACITY_MODEL_ID", "gpt-4o-mini"),
+                api_base="https://openai.vocareum.com/v1",
+                api_key=api_key,
+            )
+
+            self.inventory_worker = CodeAgent(
+                tools=[stock_level_tool, supplier_eta_tool, cash_balance_tool, unit_price_tool],
+                model=model,
+            )
+            self.quoting_worker = CodeAgent(
+                tools=[quote_history_tool, unit_price_tool],
+                model=model,
+            )
+            self.sales_worker = CodeAgent(
+                tools=[create_transaction_tool, financial_report_tool, unit_price_tool],
+                model=model,
+            )
+            self.enabled = True
+        except Exception:
+            self.enabled = False
+
+    def assess_inventory(self, requested_items: Dict[str, int], request_date: str, due_date: str) -> Dict:
+        if not self.enabled:
+            raise RuntimeError("smolagents not enabled")
+
+        task = (
+            "You are the inventory worker.\n"
+            "Input requested_items JSON: "
+            f"{json.dumps(requested_items)}\n"
+            f"request_date={request_date}, due_date={due_date}\n"
+            "For each item: get stock using stock_level_tool; if shortage exists, check supplier_eta_tool.\n"
+            "If any shortage ETA is after due_date, return can_fulfill false with reason.\n"
+            "Compute reorder_cost = needed_qty * unit_price_tool(item).\n"
+            "Check cash with cash_balance_tool and reject if reorder_cost > 90% of cash.\n"
+            "Return only valid JSON with keys: can_fulfill, reason, reorder_plan, reorder_cost."
+        )
+        output = self.inventory_worker.run(task)
+        return _as_json_dict(output, {"can_fulfill": False, "reason": "Framework parse failure", "reorder_plan": []})
+
+    def generate_quote(self, requested_items: Dict[str, int], job: str, event: str, need_size: str) -> Dict:
+        if not self.enabled:
+            raise RuntimeError("smolagents not enabled")
+
+        task = (
+            "You are the quoting worker.\n"
+            f"requested_items JSON: {json.dumps(requested_items)}\n"
+            f"context: job={job}, event={event}, need_size={need_size}\n"
+            "Compute subtotal from unit_price_tool(item) * qty.\n"
+            "Use quote_history_tool([job,event,need_size], 5) for context.\n"
+            "Apply discount rules: size small=2%, medium=5%, large=8%; volume >=5000 units adds 5%, >=1500 adds 3%; "
+            "history adds 3% if subtotal > 1.5x average historical quote.\n"
+            "Cap discount at 20%.\n"
+            "Return only valid JSON with keys: subtotal, total_amount, explanation."
+        )
+        output = self.quoting_worker.run(task)
+        return _as_json_dict(output, {"subtotal": 0.0, "total_amount": 0.0, "explanation": "Framework parse failure"})
+
+    def finalize_sale(self, requested_items: Dict[str, int], quote_total: float, request_date: str) -> None:
+        if not self.enabled:
+            raise RuntimeError("smolagents not enabled")
+
+        task = (
+            "You are the sales worker.\n"
+            f"requested_items JSON: {json.dumps(requested_items)}\n"
+            f"quote_total={quote_total}, request_date={request_date}\n"
+            "Compute subtotal from unit_price_tool. discount_ratio = quote_total / subtotal.\n"
+            "For each item, line_total = unit_price * qty * discount_ratio.\n"
+            "Write one sales transaction per item using create_transaction_tool(item_name,'sales',quantity,line_total,date).\n"
+            "Return a short confirmation message."
+        )
+        self.sales_worker.run(task)
+
+
 class OrchestratorAgent:
     def __init__(self):
         self.inventory_agent = InventoryAgent()
         self.quoting_agent = QuotingAgent()
         self.sales_agent = SalesAgent()
+        self.framework_delegator = SmolagentsDelegator()
 
     def handle_request(self, request_text: str, job: str, event: str, need_size: str) -> str:
         request_date, due_date = _parse_dates(request_text)
@@ -867,19 +1005,37 @@ class OrchestratorAgent:
                 "our current single-order operational threshold."
             )
 
-        assessment = self.inventory_agent.assess_availability(requested_items, request_date, due_date)
+        try:
+            if self.framework_delegator.enabled:
+                assessment = self.framework_delegator.assess_inventory(requested_items, request_date, due_date)
+            else:
+                assessment = self.inventory_agent.assess_availability(requested_items, request_date, due_date)
+        except Exception:
+            assessment = self.inventory_agent.assess_availability(requested_items, request_date, due_date)
+
         if not assessment["can_fulfill"]:
             return f"Order cannot be fulfilled: {assessment['reason']}"
 
-        quote = self.quoting_agent.generate_quote(requested_items, job, event, need_size)
+        try:
+            if self.framework_delegator.enabled:
+                quote = self.framework_delegator.generate_quote(requested_items, job, event, need_size)
+            else:
+                quote = self.quoting_agent.generate_quote(requested_items, job, event, need_size)
+        except Exception:
+            quote = self.quoting_agent.generate_quote(requested_items, job, event, need_size)
+
         self.inventory_agent.execute_reorder(assessment["reorder_plan"], request_date)
-        self.sales_agent.finalize_sale(requested_items, float(quote["total_amount"]), request_date)
-        financials = self.sales_agent.post_sale_summary(request_date)
+        try:
+            if self.framework_delegator.enabled:
+                self.framework_delegator.finalize_sale(requested_items, float(quote["total_amount"]), request_date)
+            else:
+                self.sales_agent.finalize_sale(requested_items, float(quote["total_amount"]), request_date)
+        except Exception:
+            self.sales_agent.finalize_sale(requested_items, float(quote["total_amount"]), request_date)
 
         return (
             f"Quote approved at ${quote['total_amount']:.2f}. {quote['explanation']} "
-            f"Order is scheduled for delivery by {due_date}. "
-            f"Updated cash balance is ${financials['cash_balance']:.2f}."
+            f"Order is scheduled for delivery by {due_date}."
         )
 
 def run_test_scenarios():

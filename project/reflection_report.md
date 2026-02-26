@@ -27,6 +27,12 @@ The implementation uses 4 agents:
 - Records sales transactions by line item.
 - Fetches updated financial report after sale.
 
+Framework integration:
+
+- The system includes a `smolagents` delegation layer (`SmolagentsDelegator`) that defines framework worker agents (`CodeAgent`) for inventory, quoting, and sales.
+- When `UDACITY_OPENAI_API_KEY` is present, the orchestrator delegates worker decisions through these framework agents.
+- If no key is present, the same flow runs through deterministic local workers for reproducible offline testing.
+
 ## 2: Tool Mapping to Starter Helper Functions
 
 All required starter helper functions are wrapped in tool definitions:
@@ -58,7 +64,7 @@ The system was run using `quote_requests_sample.csv` via `run_test_scenarios()`.
 - Output file generated: `test_results.csv`
 - Total requests evaluated: **20**
 - Requests fulfilled (response contains "Quote approved"): **10**
-- Requests with cash-balance change: **10**
+- Requests with cash-balance change: **9**
 - Not all requests were fulfilled: **True**
 
 Observed unfulfilled reasons include:

@@ -1,20 +1,20 @@
 flowchart TD
-    C[Customer Request Text] --> O[Orchestrator Agent]
+    C[Customer Request Text] --> O["Orchestrator Agent<br/>Role: parse request, delegate worker tasks,<br/>and consolidate final customer response."]
     O --> P[Parser Helpers]
     P --> D1[Extract request_date and due_date]
     P --> D2[Extract catalog items and quantities]
 
-    O --> I[Inventory Agent]
+    O --> I["Inventory Agent<br/>Role: validate stock coverage,<br/>reorder feasibility, supplier ETA, and cash constraints."]
     I --> T1["inventory_snapshot_tool -> get_all_inventory"]
     I --> T2["stock_level_tool -> get_stock_level"]
     I --> T3["supplier_eta_tool -> get_supplier_delivery_date"]
     I --> T4["cash_balance_tool -> get_cash_balance"]
     I --> T5["create_transaction_tool(stock_orders) -> create_transaction"]
 
-    O --> Q[Quoting Agent]
+    O --> Q["Quoting Agent<br/>Role: compute subtotal/discounts and generate<br/>explainable quote using historical patterns."]
     Q --> T6["quote_history_tool -> search_quote_history"]
 
-    O --> S[Sales Agent]
+    O --> S["Sales Agent<br/>Role: finalize approved sales transactions<br/>and provide internal post-sale reporting."]
     S --> T7["create_transaction_tool(sales) -> create_transaction"]
     S --> T8["financial_report_tool -> generate_financial_report"]
 
