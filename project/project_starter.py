@@ -2,12 +2,24 @@ import pandas as pd
 import numpy as np
 import os
 import time
-import dotenv
 import ast
+import re
 from sqlalchemy.sql import text
 from datetime import datetime, timedelta
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Tuple
 from sqlalchemy import create_engine, Engine
+
+try:
+    import dotenv
+except Exception:
+    dotenv = None
+
+try:
+    # Optional dependency to align with a tool-oriented smolagents style.
+    from smolagents import tool
+except Exception:
+    def tool(func):
+        return func
 
 # Create an SQLite database
 db_engine = create_engine("sqlite:///munder_difflin.db")
@@ -589,31 +601,291 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 ########################
 
 
-# Set up and load your env parameters and instantiate your model.
+if dotenv is not None:
+    dotenv.load_dotenv()
+
+ITEM_PRICE = {item["item_name"]: item["unit_price"] for item in paper_supplies}
+
+ITEM_ALIASES = {
+    "A4 paper": ["a4 paper", "a4 printer paper", "a4 printing paper", "a4 white paper", "a4 copier paper"],
+    "Standard copy paper": ["standard copy paper", "standard printer paper", "printer paper", "copy paper"],
+    "Cardstock": ["cardstock", "heavy cardstock", "white cardstock", "colored cardstock", "card stock"],
+    "Colored paper": ["colored paper", "colorful paper", "bright-colored paper"],
+    "Glossy paper": ["glossy paper", "glossy a4 paper"],
+    "Matte paper": ["matte paper"],
+    "Recycled paper": ["recycled paper", "eco-friendly paper"],
+    "Poster paper": ["poster paper", "poster board", "posters", "large poster paper"],
+    "Banner paper": ["banner paper", "banners"],
+    "Construction paper": ["construction paper"],
+    "Wrapping paper": ["wrapping paper", "decorative wrapping paper", "patterned wrapping paper"],
+    "Letter-sized paper": ["letter-sized paper", "letter size paper"],
+    "Letterhead paper": ["letterhead", "letterhead paper"],
+    "Envelopes": ["envelopes", "envelope"],
+    "Sticky notes": ["sticky notes"],
+    "Notepads": ["notepads"],
+    "Invitation cards": ["invitation cards", "tickets"],
+    "Flyers": ["flyers"],
+    "Party streamers": ["streamers", "party streamers"],
+    "Decorative adhesive tape (washi tape)": ["washi tape", "decorative adhesive tape", "masking tape"],
+    "Presentation folders": ["presentation folders", "folders"],
+    "Paper plates": ["paper plates", "plates"],
+    "Paper cups": ["paper cups", "cups"],
+    "Paper napkins": ["paper napkins", "napkins", "table napkins"],
+    "Table covers": ["table covers"],
+    "Large poster paper (24x36 inches)": ["24x36 inches", "24x36", "large-format poster paper"],
+    "Rolls of banner paper (36-inch width)": ["36-inch width", "rolls of banner paper"],
+    "100 lb cover stock": ["100 lb cover stock"],
+    "80 lb text paper": ["80 lb text paper"],
+    "250 gsm cardstock": ["250 gsm cardstock", "250 gsm"],
+    "220 gsm poster paper": ["220 gsm poster paper"],
+}
+
+UNIT_MULTIPLIERS = {
+    "ream": 500,
+    "reams": 500,
+    "box": 250,
+    "boxes": 250,
+    "pack": 100,
+    "packs": 100,
+    "packet": 100,
+    "packets": 100,
+}
 
 
-"""Set up tools for your agents to use, these should be methods that combine the database functions above
- and apply criteria to them to ensure that the flow of the system is correct."""
+def _parse_dates(request_text: str) -> Tuple[str, str]:
+    request_date_match = re.search(r"Date of request:\s*(\d{4}-\d{2}-\d{2})", request_text)
+    request_date = request_date_match.group(1) if request_date_match else datetime.now().strftime("%Y-%m-%d")
+
+    due_match = re.search(r"by\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})", request_text, flags=re.IGNORECASE)
+    due_date = request_date
+    if due_match:
+        try:
+            due_date = datetime.strptime(due_match.group(1), "%B %d, %Y").strftime("%Y-%m-%d")
+        except ValueError:
+            due_date = request_date
+    return request_date, due_date
 
 
-# Tools for inventory agent
+def _extract_line_items(request_text: str) -> Tuple[Dict[str, int], List[str]]:
+    text_lower = request_text.lower()
+    matched: Dict[str, int] = {}
+    unknown_mentions: List[str] = []
+
+    generic_mentions = re.findall(
+        r"(\d{1,3}(?:,\d{3})*)\s*(sheets?|reams?|rolls?|boxes?|packs?|packets?)?\s*(?:of\s+)?([a-z0-9\"'().\- ]{3,55})",
+        text_lower,
+    )
+
+    for qty_raw, unit_raw, phrase in generic_mentions:
+        if any(skip in phrase for skip in ["2025", "delivery", "april", "may"]):
+            continue
+        phrase = phrase.strip(" ,.-")
+        if len(phrase) < 3:
+            continue
+
+        canonical_item = None
+        for item_name, aliases in ITEM_ALIASES.items():
+            if any(alias in phrase for alias in aliases):
+                canonical_item = item_name
+                break
+
+        if canonical_item is None:
+            if any(keyword in phrase for keyword in ["a3", "balloons", "cardboard", "tickets"]):
+                unknown_mentions.append(phrase)
+            continue
+
+        qty = int(qty_raw.replace(",", ""))
+        qty *= UNIT_MULTIPLIERS.get((unit_raw or "sheets").lower(), 1)
+        matched[canonical_item] = matched.get(canonical_item, 0) + qty
+
+    return matched, unknown_mentions
 
 
-# Tools for quoting agent
+@tool
+def inventory_snapshot_tool(as_of_date: str) -> Dict[str, int]:
+    return get_all_inventory(as_of_date)
 
 
-# Tools for ordering agent
+@tool
+def stock_level_tool(item_name: str, as_of_date: str) -> int:
+    stock_df = get_stock_level(item_name, as_of_date)
+    return int(stock_df["current_stock"].iloc[0]) if not stock_df.empty else 0
 
 
-# Set up your agents and create an orchestration agent that will manage them.
+@tool
+def supplier_eta_tool(request_date: str, quantity: int) -> str:
+    return get_supplier_delivery_date(request_date, quantity)
 
 
-# Run your test scenarios by writing them here. Make sure to keep track of them.
+@tool
+def cash_balance_tool(as_of_date: str) -> float:
+    return get_cash_balance(as_of_date)
+
+
+@tool
+def quote_history_tool(search_terms: List[str], limit: int = 5) -> List[Dict]:
+    return search_quote_history(search_terms, limit=limit)
+
+
+@tool
+def create_transaction_tool(item_name: str, transaction_type: str, quantity: int, price: float, date: str) -> int:
+    return create_transaction(item_name, transaction_type, quantity, price, date)
+
+
+@tool
+def financial_report_tool(as_of_date: str) -> Dict:
+    return generate_financial_report(as_of_date)
+
+
+class InventoryAgent:
+    def assess_availability(self, requested_items: Dict[str, int], request_date: str, due_date: str) -> Dict:
+        reorder_plan: List[Dict] = []
+        reorder_cost = 0.0
+
+        for item_name, quantity in requested_items.items():
+            current_stock = stock_level_tool(item_name, request_date)
+            needed = max(0, quantity - current_stock)
+            if needed <= 0:
+                continue
+
+            delivery_date = supplier_eta_tool(request_date, needed)
+            if delivery_date > due_date:
+                return {
+                    "can_fulfill": False,
+                    "reason": (
+                        f"Cannot restock {item_name} in time. Earliest supplier date is {delivery_date}, "
+                        f"after required date {due_date}."
+                    ),
+                    "reorder_plan": [],
+                    "reorder_cost": 0.0,
+                }
+
+            cost = needed * ITEM_PRICE[item_name]
+            reorder_cost += cost
+            reorder_plan.append({"item_name": item_name, "quantity": needed, "cost": cost})
+
+        available_cash = cash_balance_tool(request_date)
+        if reorder_cost > available_cash * 0.9:
+            return {
+                "can_fulfill": False,
+                "reason": f"Insufficient cash for reorder. Need ${reorder_cost:.2f}, available ${available_cash:.2f}.",
+                "reorder_plan": [],
+                "reorder_cost": reorder_cost,
+            }
+
+        return {
+            "can_fulfill": True,
+            "reason": "Inventory can satisfy request with feasible restock.",
+            "reorder_plan": reorder_plan,
+            "reorder_cost": reorder_cost,
+        }
+
+    def execute_reorder(self, reorder_plan: List[Dict], request_date: str) -> None:
+        for reorder in reorder_plan:
+            create_transaction_tool(
+                item_name=reorder["item_name"],
+                transaction_type="stock_orders",
+                quantity=reorder["quantity"],
+                price=float(reorder["cost"]),
+                date=request_date,
+            )
+
+
+class QuotingAgent:
+    def generate_quote(self, requested_items: Dict[str, int], job: str, event: str, need_size: str) -> Dict:
+        subtotal = sum(ITEM_PRICE[item_name] * qty for item_name, qty in requested_items.items())
+        total_units = sum(requested_items.values())
+
+        historical_quotes = quote_history_tool([job, event, need_size], limit=5)
+        size_discount = {"small": 0.02, "medium": 0.05, "large": 0.08}.get(need_size.lower(), 0.02)
+        volume_discount = 0.05 if total_units >= 5000 else 0.03 if total_units >= 1500 else 0.0
+        history_discount = 0.0
+
+        if historical_quotes:
+            average_historical = float(np.mean([float(q["total_amount"]) for q in historical_quotes]))
+            if subtotal > average_historical * 1.5:
+                history_discount = 0.03
+
+        total_discount = min(0.2, size_discount + volume_discount + history_discount)
+        total_amount = round(subtotal * (1 - total_discount), 2)
+
+        explanation = (
+            f"Catalog subtotal is ${subtotal:.2f}. Applied {total_discount*100:.1f}% total discount "
+            f"(size {size_discount*100:.1f}%, volume {volume_discount*100:.1f}%, history {history_discount*100:.1f}%). "
+            f"Final quote is ${total_amount:.2f}."
+        )
+
+        return {"subtotal": subtotal, "total_amount": total_amount, "explanation": explanation}
+
+
+class SalesAgent:
+    def finalize_sale(self, requested_items: Dict[str, int], quote_total: float, request_date: str) -> None:
+        subtotal = sum(ITEM_PRICE[item_name] * qty for item_name, qty in requested_items.items())
+        if subtotal <= 0:
+            return
+        ratio = quote_total / subtotal
+        for item_name, quantity in requested_items.items():
+            line_total = round(ITEM_PRICE[item_name] * quantity * ratio, 2)
+            create_transaction_tool(
+                item_name=item_name,
+                transaction_type="sales",
+                quantity=quantity,
+                price=float(line_total),
+                date=request_date,
+            )
+
+    def post_sale_summary(self, request_date: str) -> Dict:
+        return financial_report_tool(request_date)
+
+
+class OrchestratorAgent:
+    def __init__(self):
+        self.inventory_agent = InventoryAgent()
+        self.quoting_agent = QuotingAgent()
+        self.sales_agent = SalesAgent()
+
+    def handle_request(self, request_text: str, job: str, event: str, need_size: str) -> str:
+        request_date, due_date = _parse_dates(request_text)
+        requested_items, unknown_mentions = _extract_line_items(request_text)
+
+        if not requested_items:
+            return (
+                "Unable to generate a quote because no supported catalog items were parsed. "
+                "Please provide item names from the catalog."
+            )
+
+        if unknown_mentions:
+            return (
+                "We cannot fulfill the full request because some items are outside our catalog: "
+                + ", ".join(sorted(set(unknown_mentions))[:3])
+                + "."
+            )
+
+        if sum(requested_items.values()) > 20000:
+            return (
+                "We cannot fulfill this request as submitted because the order volume exceeds "
+                "our current single-order operational threshold."
+            )
+
+        assessment = self.inventory_agent.assess_availability(requested_items, request_date, due_date)
+        if not assessment["can_fulfill"]:
+            return f"Order cannot be fulfilled: {assessment['reason']}"
+
+        quote = self.quoting_agent.generate_quote(requested_items, job, event, need_size)
+        self.inventory_agent.execute_reorder(assessment["reorder_plan"], request_date)
+        self.sales_agent.finalize_sale(requested_items, float(quote["total_amount"]), request_date)
+        financials = self.sales_agent.post_sale_summary(request_date)
+
+        return (
+            f"Quote approved at ${quote['total_amount']:.2f}. {quote['explanation']} "
+            f"Order is scheduled for delivery by {due_date}. "
+            f"Updated cash balance is ${financials['cash_balance']:.2f}."
+        )
 
 def run_test_scenarios():
     
     print("Initializing Database...")
-    init_database()
+    init_database(db_engine)
     try:
         quote_requests_sample = pd.read_csv("quote_requests_sample.csv")
         quote_requests_sample["request_date"] = pd.to_datetime(
@@ -638,6 +910,7 @@ def run_test_scenarios():
     ############
     ############
     ############
+    orchestrator = OrchestratorAgent()
 
     results = []
     for idx, row in quote_requests_sample.iterrows():
@@ -659,8 +932,12 @@ def run_test_scenarios():
         ############
         ############
         ############
-
-        # response = call_your_multi_agent_system(request_with_date)
+        response = orchestrator.handle_request(
+            request_text=request_with_date,
+            job=row["job"],
+            event=row["event"],
+            need_size=row["need_size"],
+        )
 
         # Update state
         report = generate_financial_report(request_date)

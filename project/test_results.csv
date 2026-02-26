@@ -1,0 +1,21 @@
+request_id,request_date,cash_balance,inventory_value,response
+1,2025-04-01,45123.399999999994,4875.3,"Quote approved at $63.70. Catalog subtotal is $65.00. Applied 2.0% total discount (size 2.0%, volume 0.0%, history 0.0%). Final quote is $63.70. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45123.40."
+2,2025-04-03,45123.399999999994,4875.3,We cannot fulfill the full request because some items are outside our catalog: balloons for the parade. please deliver the supplies by.
+3,2025-04-04,45123.399999999994,4875.3,We cannot fulfill the full request because some items are outside our catalog: a3 paper.
+4,2025-04-05,45123.2,4875.3,"Quote approved at $9.80. Catalog subtotal is $10.00. Applied 2.0% total discount (size 2.0%, volume 0.0%, history 0.0%). Final quote is $9.80. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45123.20."
+5,2025-04-05,45211.45,4780.3,"Quote approved at $128.25. Catalog subtotal is $135.00. Applied 5.0% total discount (size 5.0%, volume 0.0%, history 0.0%). Final quote is $128.25. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45211.45."
+6,2025-04-06,45239.16,4751.05,"Quote approved at $75.46. Catalog subtotal is $77.00. Applied 2.0% total discount (size 2.0%, volume 0.0%, history 0.0%). Final quote is $75.46. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45239.16."
+7,2025-04-07,45239.16,4751.05,We cannot fulfill the full request because some items are outside our catalog: 0 sheets of matte a3 paper.
+8,2025-04-07,45322.40000000001,4654.85,"Quote approved at $149.04. Catalog subtotal is $162.00. Applied 8.0% total discount (size 8.0%, volume 0.0%, history 0.0%). Final quote is $149.04. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45322.40."
+9,2025-04-07,45322.40000000001,4654.85,"Order cannot be fulfilled: Cannot restock Standard copy paper in time. Earliest supplier date is 2025-04-11, after required date 2025-04-10."
+13,2025-04-08,45322.40000000001,4654.85,"Order cannot be fulfilled: Cannot restock A4 paper in time. Earliest supplier date is 2025-04-12, after required date 2025-04-10."
+12,2025-04-08,45321.36,4654.85,"Quote approved at $50.96. Catalog subtotal is $52.00. Applied 2.0% total discount (size 2.0%, volume 0.0%, history 0.0%). Final quote is $50.96. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45321.36."
+10,2025-04-08,45316.36,4654.85,"Quote approved at $95.00. Catalog subtotal is $100.00. Applied 5.0% total discount (size 5.0%, volume 0.0%, history 0.0%). Final quote is $95.00. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45316.36."
+11,2025-04-08,45314.36,4654.85,"Quote approved at $98.00. Catalog subtotal is $100.00. Applied 2.0% total discount (size 2.0%, volume 0.0%, history 0.0%). Final quote is $98.00. Order is scheduled for delivery by 2025-04-15. Updated cash balance is $45314.36."
+14,2025-04-09,45314.36,4654.85,"Order cannot be fulfilled: Cannot restock A4 paper in time. Earliest supplier date is 2025-04-16, after required date 2025-04-15."
+15,2025-04-12,45314.36,4654.85,We cannot fulfill the full request because some items are outside our catalog: cardboard for signage.
+16,2025-04-13,45314.36,4654.85,"Order cannot be fulfilled: Cannot restock A4 paper in time. Earliest supplier date is 2025-04-17, after required date 2025-04-15."
+17,2025-04-14,45314.36,4654.85,"Order cannot be fulfilled: Cannot restock Colored paper in time. Earliest supplier date is 2025-04-18, after required date 2025-04-15."
+18,2025-04-14,45314.36,4654.85,"Order cannot be fulfilled: Cannot restock Cardstock in time. Earliest supplier date is 2025-04-18, after required date 2025-04-15."
+19,2025-04-15,45310.26,4654.85,"Quote approved at $77.90. Catalog subtotal is $82.00. Applied 5.0% total discount (size 5.0%, volume 0.0%, history 0.0%). Final quote is $77.90. Order is scheduled for delivery by 2025-04-20. Updated cash balance is $45310.26."
+20,2025-04-17,45147.76,4654.85,"Quote approved at $1087.50. Catalog subtotal is $1250.00. Applied 13.0% total discount (size 8.0%, volume 5.0%, history 0.0%). Final quote is $1087.50. Order is scheduled for delivery by 2025-05-15. Updated cash balance is $45147.76."
